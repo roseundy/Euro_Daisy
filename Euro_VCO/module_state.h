@@ -1,8 +1,8 @@
 //
 // module state
 
-#ifndef MODULE_STATE_H_
-#define MODULE_STATE_H_
+#ifndef MODULE_VCOSTATE_H_
+#define MODULE_VCOSTATE_H_
 
 namespace VCO {
 
@@ -17,12 +17,45 @@ enum voiceType {
 	MODE_BASS = 7,
 	MODE_SNARE = 8,
 	MODE_HIHAT = 9,
+    MODE_RINGS = 10,
 };
 
 enum pairWaveformType {
     PAIR_SINE = 0,
     PAIR_SQUARE = 1,
     PAIR_TRIANGLE = 2,
+};
+
+enum ringPolyType {
+    RING_POLY_ONE = 0,
+    RING_POLY_TWO = 1,
+    RING_POLY_FOUR = 2,
+};
+
+enum ringModelType {
+    RING_MODEL_MODAL = 0,
+    RING_MODEL_SYMPATHETIC = 1,
+    RING_MODEL_INHARMONIC = 2,
+    RING_MODEL_FM = 3,
+    RING_MODEL_QUANTIZED = 4,
+    RING_MODEL_REVERB = 5,
+    RING_MODEL_EGG = 6,
+};
+
+// For Easter Egg
+enum ringFxType {
+    RING_FX_FORMANT = 6,
+    RING_FX_CHORUS = 7,
+    RING_FX_REVERB = 8,
+    RING_FX_FORMANT2 = 9,
+    RING_FX_ENSEMBLE = 10,
+    RING_FX_REVERB2 = 11,
+};
+
+enum ringNormalType {
+    RING_NORMAL_NONE = 0,
+    RING_NORMAL_NOTE = 1,
+    RING_NORMAL_STRUM = 2,
 };
 
 struct envelopeState {
@@ -79,6 +112,12 @@ struct moduleState
     // Voice:Bass Drum
     float               bassAccent;
 
+    // Voice: Rings
+    ringPolyType        ringPoly;
+    ringModelType       ringModel;
+    ringFxType          ringFx;
+    ringNormalType      ringNormal;
+
     // Attenuvert
     float               p1Attenuvert;
     float               p2Attenuvert;
@@ -120,6 +159,10 @@ struct moduleState
              (this->fmOpSettings[3] == rhs.fmOpSettings[3]) &&
              (this->pluckMode == rhs.pluckMode) &&
              (this->bassAccent == rhs.bassAccent) &&
+             (this->ringPoly == rhs.ringPoly) &&
+             (this->ringModel == rhs.ringModel) &&
+             (this->ringFx == rhs.ringFx) &&
+             (this->ringNormal == rhs.ringNormal) &&
              (this->p1Attenuvert == rhs.p1Attenuvert) &&
              (this->p2Attenuvert == rhs.p2Attenuvert) &&
              (this->p3Attenuvert == rhs.p3Attenuvert) &&
@@ -138,4 +181,4 @@ struct moduleState
 
 } // namespace VCO
 
-#endif // MODULE_STATE_H_
+#endif // MODULE_VCOSTATE_H_

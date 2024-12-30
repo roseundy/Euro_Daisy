@@ -1,4 +1,5 @@
 #include "daisysp.h"
+#include "daisysp-lgpl.h"
 #include "daisy_patch_sm.h"
 #include "UiHardware.h"
 #include "module_state.h"
@@ -6,6 +7,11 @@
 #include "fm3.h"
 #include "fm4op.h"
 #include "dev/oled_ssd130x.h"
+#include "dsp/dsp.h"
+#include "dsp/performance_state.h"
+#include "dsp/part.h"
+#include "dsp/strummer.h"
+#include "dsp/string_synth_part.h"
 
 using namespace daisy;
 using namespace patch_sm;
@@ -36,6 +42,9 @@ AnalogBassDrum          bassDrum;
 AnalogSnareDrum         snareDrum;
 HiHat<>                 hiHat;
 WhiteNoise              white;
+torus::Part             part;
+torus::StringSynthPart  string_synth;
+torus::Strummer         strummer;
 #ifdef REV0P1
 Led                     gateLed;
 Switch                  gateSwitch;
@@ -60,7 +69,7 @@ FullScreenItemMenu      fmOp3Menu;
 
 const int                kNumMainMenuItems = 9;
 AbstractMenu::ItemConfig mainMenuItems[kNumMainMenuItems];
-const int                kNumVoiceConfMenuItems = 11;
+const int                kNumVoiceConfMenuItems = 15;
 AbstractMenu::ItemConfig voiceConfMenuItems[kNumVoiceConfMenuItems];
 const int                kNumAttenuvertMenuItems = 5;
 AbstractMenu::ItemConfig attenuvertMenuItems[kNumAttenuvertMenuItems];
@@ -79,8 +88,8 @@ AbstractMenu::ItemConfig fmOp3MenuItems[kNumFmOp3MenuItems];
 
 // voice menu items
 const char* voiceListValues[]
-    = {"Pair", "Harmonic", "FM", "Formant", "Strings", "Chord", "Pluck", "Bass Drum", "Snare", "HiHat"};
-MappedStringListValue voiceListValue(voiceListValues, 10, 0);
+    = {"Pair", "Harmonic", "FM", "Formant", "Strings", "Chord", "Pluck", "Bass Drum", "Snare", "HiHat", "Rings"};
+MappedStringListValue voiceListValue(voiceListValues, 11, 0);
 
 // pair menu items
 const char* pairListValues[]
@@ -95,6 +104,25 @@ MappedStringListValue pluckListValue(pluckListValues, 2, 0);
 
 // bass drum
 MappedFloatValue bassAccentValue(0.0f, 1.0f, 0.0f, MappedFloatValue::Mapping::lin, "", 2, true);
+
+// ring polyphonic
+const char* ringPolyValues[]
+    = {"1 Voice", "2 Voices", "4 Voices"};
+MappedStringListValue ringPolyValue(ringPolyValues, 3, 0);
+
+// ring model
+const char* ringModelValues[]
+    = {"Modal", "Symp Str", "Inhrm Str", "Fm Voice", "Westn Chrd", "Str & Verb", "Easter Egg" };
+MappedStringListValue ringModelValue(ringModelValues, 7, 0);
+
+const char* ringFxValues[]
+    = {"Formant", "Chorus", "Reverb", "Formant2", "Ensemble", "Reverb2"};
+MappedStringListValue ringFxValue(ringFxValues, 6, 0);
+
+// ring normalization
+const char* ringNormalValues[]
+    = {"V/OCT+Gate", "No V/OCT", "No Gate"};
+MappedStringListValue ringNormalValue(ringNormalValues, 3, 0);
 
 // output attenuvert values
 MappedFloatValue attenuvertValueP1(-1.0f, 1.0f, 0.0f, MappedFloatValue::Mapping::lin, "", 2, true);
@@ -177,7 +205,7 @@ void initFmOp(fmOpState *opState) {
 #endif
 
 void initFactoryState(moduleState *state) {
-    state->version = 10;
+    state->version = 11;
 
 	state->voice = MODE_PAIR;
 	state->pairWaveform[0] = PAIR_SINE;
@@ -192,6 +220,11 @@ void initFactoryState(moduleState *state) {
     state->pluckMode = PLUCK_MODE_RECURSIVE;
 
     state->bassAccent = 0.0f;
+
+    state->ringPoly = RING_POLY_ONE;
+    state->ringModel = RING_MODEL_MODAL;
+    state->ringFx = RING_FX_FORMANT;
+    state->ringNormal = RING_NORMAL_NONE;
 
     state->p1Attenuvert = 0.0f;
     state->p2Attenuvert = 0.1f;
@@ -331,8 +364,24 @@ void InitUiPages()
     voiceConfMenuItems[9].text = "Bass Acnt";
     voiceConfMenuItems[9].asMappedValueItem.valueToModify = &bassAccentValue;
 
-    voiceConfMenuItems[10].type = daisy::AbstractMenu::ItemType::closeMenuItem;
-    voiceConfMenuItems[10].text = "Back";
+    voiceConfMenuItems[10].type = daisy::AbstractMenu::ItemType::valueItem;
+    voiceConfMenuItems[10].text = "Ring Poly";
+    voiceConfMenuItems[10].asMappedValueItem.valueToModify = &ringPolyValue;
+
+    voiceConfMenuItems[11].type = daisy::AbstractMenu::ItemType::valueItem;
+    voiceConfMenuItems[11].text = "Ring Model";
+    voiceConfMenuItems[11].asMappedValueItem.valueToModify = &ringModelValue;
+
+    voiceConfMenuItems[12].type = daisy::AbstractMenu::ItemType::valueItem;
+    voiceConfMenuItems[12].text = "Ring EggFx";
+    voiceConfMenuItems[12].asMappedValueItem.valueToModify = &ringFxValue;
+
+    voiceConfMenuItems[13].type = daisy::AbstractMenu::ItemType::valueItem;
+    voiceConfMenuItems[13].text = "Ring Norm";
+    voiceConfMenuItems[13].asMappedValueItem.valueToModify = &ringNormalValue;
+
+    voiceConfMenuItems[14].type = daisy::AbstractMenu::ItemType::closeMenuItem;
+    voiceConfMenuItems[14].text = "Back";
 
     voiceConfMenu.Init(voiceConfMenuItems, kNumVoiceConfMenuItems);
 
@@ -620,6 +669,12 @@ void State2Ui(moduleState &VCOState) {
     // Voice: Bass Drum
     bassAccentValue.Set(VCOState.bassAccent);
 
+    // Voice: Rings
+    ringPolyValue.SetIndex(VCOState.ringPoly);
+    ringModelValue.SetIndex(VCOState.ringModel);
+    ringFxValue.SetIndex(VCOState.ringFx);
+    ringNormalValue.SetIndex(VCOState.ringNormal);
+
     // Attenuverts
     attenuvertValueP1.Set(VCOState.p1Attenuvert);
     attenuvertValueP2.Set(VCOState.p2Attenuvert);
@@ -709,6 +764,12 @@ moduleState &ProcessState() {
 
     // Voice: Bass Drum
     VCOState.bassAccent = bassAccentValue.Get();
+
+    // Voice: Rings
+    VCOState.ringPoly = (ringPolyType) ringPolyValue.GetIndex();
+    VCOState.ringModel = (ringModelType) ringModelValue.GetIndex();
+    VCOState.ringFx = (ringFxType) ringFxValue.GetIndex();
+    VCOState.ringNormal = (ringNormalType) ringNormalValue.GetIndex();
 
     // Attenuverts
     VCOState.p1Attenuvert = attenuvertValueP1.Get();
@@ -964,12 +1025,20 @@ void generateInversion(float select, float *nonroot_freq) {
     }
 }
 
+ringPolyType old_poly = RING_POLY_ONE;
+float ringInput[torus::kMaxBlockSize];
+float ringOutput[torus::kMaxBlockSize];
+float ringAux[torus::kMaxBlockSize];
+
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
 	hw.ProcessAllControls();
 	enc.Debounce();
 	GenerateUiEvents();
     moduleState &VCOState = ProcessState();
+    torus::PerformanceState performance_state; // Rings
+    torus::Patch            patch;             // Rings
+    bool                    easterEgg;         // Rings
 
     // Set frequency based on CV_1 (V/OCT) and CV_6 (manual tuning)
     #ifdef REV0P0
@@ -1239,6 +1308,56 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         hiHat.SetAccent(p3);
         hiHat.SetNoisiness(p4);
     }
+    if (VCOState.voice == MODE_RINGS) {
+        // Rings (from Mutable Instruments)
+        // p1: structure
+        // p2: damping
+        // p3: brightness
+        // p4: position
+
+        patch.structure = p1;
+        patch.damping = p2;
+        patch.brightness = p3;
+        patch.position = p4;
+
+        performance_state.strum = trigger;
+        performance_state.internal_exciter = true;
+        performance_state.internal_note = (VCOState.ringNormal == RING_NORMAL_NOTE);
+        performance_state.internal_strum = (VCOState.ringNormal == RING_NORMAL_STRUM);
+        performance_state.tonic = (tune + 1.0f) * 12.0f;
+        performance_state.note = performance_state.internal_note ? 0.0f : (voct * 12.0f);
+        performance_state.fm = 0.0f;
+
+        float chord = p1;
+        chord *= static_cast<float>(torus::kNumChords - 1);
+        CONSTRAIN(chord, 0, torus::kNumChords - 1);
+        performance_state.chord = chord;
+
+        // polyphony setting
+        if (old_poly != VCOState.ringPoly) {
+            part.set_polyphony(0x01 << VCOState.ringPoly);
+            string_synth.set_polyphony(0x01 << VCOState.ringPoly);
+        }
+        old_poly = VCOState.ringPoly;
+    
+        // model settings
+        easterEgg = (VCOState.ringModel == RING_MODEL_EGG);
+        if (!easterEgg)
+            part.set_model((torus::ResonatorModel) VCOState.ringModel);
+        string_synth.set_fx((torus::FxType) VCOState.ringFx);
+
+        // inputs/outputs
+        for(size_t i = 0; i < size; ++i) {
+                ringInput[i] = 0.0f;
+        }
+        if(easterEgg) {
+            strummer.Process(NULL, size, &performance_state);
+            string_synth.Process(performance_state, patch, ringInput, ringOutput, ringAux, size);
+        } else {
+            strummer.Process(ringInput, size, &performance_state);
+            part.Process(performance_state, patch, ringInput, ringOutput, ringAux, size);
+        }
+    }
 
 	for (size_t i = 0; i < size; i++)
 	{
@@ -1308,6 +1427,11 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             out1 = hiHat.Process(trigger);
             trigger = false;
             out2 = white.Process();
+        }
+        if (VCOState.voice == MODE_RINGS) {
+            out1 = ringOutput[i];
+            out2 = ringAux[i];
+            trigger = false;
         }
 
 		OUT_L[i] = out1 * VCOState.gain;
