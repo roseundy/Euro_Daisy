@@ -19,8 +19,8 @@ using namespace daisysp;
 using namespace VCO;
 using MyOledDisplay = OledDisplay<SSD130xI2c128x64Driver>;
 
-//#define REV0P0
-#define REV0P1
+#define REV0P0
+//#define REV0P1
 
 DaisyPatchSM 			hw;
 
@@ -42,9 +42,12 @@ AnalogBassDrum          bassDrum;
 AnalogSnareDrum         snareDrum;
 HiHat<>                 hiHat;
 WhiteNoise              white;
-torus::Part             part;
+torus::Part DSY_SDRAM_BSS part;
+//torus::Part             part;
 torus::StringSynthPart  string_synth;
 torus::Strummer         strummer;
+uint16_t DSY_SDRAM_BSS  ring_reverb_buffer[32768];
+float DSY_SDRAM_BSS     torus::lut_sine[LUT_SINE_SIZE];
 #ifdef REV0P1
 Led                     gateLed;
 Switch                  gateSwitch;
@@ -53,9 +56,9 @@ Switch                  gateSwitch;
 Adsr 					env;                    // For voices that have an optional envelope
 
 Encoder 				enc;
-MyOledDisplay   		display;
+MyOledDisplay           display;
 daisy::UI 				ui;
-UiEventQueue       		eventQueue;
+UiEventQueue            eventQueue;
 
 FullScreenItemMenu 		mainMenu;
 FullScreenItemMenu		voiceConfMenu;
@@ -1315,6 +1318,10 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         // p3: brightness
         // p4: position
 
+        CONSTRAIN(p1, 0.0f, 1.0f);
+        CONSTRAIN(p2, 0.0f, 1.0f);
+        CONSTRAIN(p3, 0.0f, 1.0f);
+        CONSTRAIN(p4, 0.0f, 1.0f);
         patch.structure = p1;
         patch.damping = p2;
         patch.brightness = p3;
@@ -1508,6 +1515,12 @@ int main(void)
     bassDrum.Init(sample_rate);
     snareDrum.Init(sample_rate);
     hiHat.Init(sample_rate);
+
+    // Rings
+    torus::InitResources();
+    strummer.Init(0.01f, sample_rate / block_size);
+    part.Init(ring_reverb_buffer);
+    string_synth.Init(ring_reverb_buffer);
 
     // Noise
     white.Init();
