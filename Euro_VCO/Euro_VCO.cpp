@@ -19,8 +19,8 @@ using namespace daisysp;
 using namespace VCO;
 using MyOledDisplay = OledDisplay<SSD130xI2c128x64Driver>;
 
-#define REV0P0
-//#define REV0P1
+//#define REV0P0
+#define REV0P1
 
 DaisyPatchSM 			hw;
 
@@ -870,6 +870,11 @@ float quantizeFreq(float raw) {
     return ((float) iquant / 12.0f);
 }
 
+// Round to integer midi
+float quantizeMidi(float raw) {
+    return(roundf(raw));
+}
+
 void Normalize(float *vals, int size, float max_total) {
     float total = 0.0f;
     for (int i=0; i<size; i++)
@@ -1331,9 +1336,20 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         performance_state.internal_exciter = true;
         performance_state.internal_note = (VCOState.ringNormal == RING_NORMAL_NOTE);
         performance_state.internal_strum = (VCOState.ringNormal == RING_NORMAL_STRUM);
-        performance_state.tonic = (tune + 1.0f) * 12.0f;
+        // tonic: for octInt 2 => midi 15 - 75 center 45
+        // note - this is different from the Mutable Instruments code (center is 42)
+        performance_state.tonic = (tune + 5.0f) * 6.0f + 15.0f;
+        performance_state.tonic += ((float) VCOState.octInt - 2.0) * 12.0f;
+        if (performance_state.tonic < 0.0f)
+            performance_state.tonic = 0.0f;
+        // note: midi -60 - 60
         performance_state.note = performance_state.internal_note ? 0.0f : (voct * 12.0f);
         performance_state.fm = 0.0f;
+
+        if (VCOState.quantize) {
+            performance_state.tonic = quantizeMidi(performance_state.tonic);
+            performance_state.note = quantizeMidi(performance_state.note);
+        }
 
         float chord = p1;
         chord *= static_cast<float>(torus::kNumChords - 1);
