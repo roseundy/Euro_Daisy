@@ -5,6 +5,7 @@
 #include "module_state.h"
 #include "sample_player.h"
 #include "string_sort.h"
+#include "smoother.h"
 //#include <vector>
 //#include <string>
 //#include <algorithm>
@@ -37,11 +38,19 @@ enum EditSubField {
 	SUBEDIT_DIR = 0,
 	SUBEDIT_SAMPLE = 1,
 	SUBEDIT_LEVEL = 2,
-	SUBEDIT_SAMPLE_ATT = 3,
-	SUBEDIT_CVOFFSET = 4,
+	SUBEDIT_CVATT = 3,
+	SUBEDIT_CVTARGET = 4,
 
 	NUM_SUBEDIT,
 };
+
+enum CVTargetField {
+	CVTARGET_SAMPLE = 0,
+	CVTARGET_LEVEL = 1,
+
+	NUM_CVTARGET,
+};
+const char *target_names[] = {"Sample", "Level"};
 
 EditField               editting = EDIT_NONE;
 EditSubField            sub_editting = SUBEDIT_DIR;
@@ -79,15 +88,16 @@ struct ChannelInfo {
 ChannelInfo channelData[4];
 volatile int channel_updating[4];
 
-#define SAVE_VERSION 2
+#define SAVE_VERSION 3
 void initFactoryState(ModuleState *factory) {
 	factory->version = SAVE_VERSION;
 	for (int i=0; i<4; i++) {
 		factory->channel[i].dirNum = i;
 		factory->channel[i].sampleNum = 0;
 		factory->channel[i].level = 50;
-		factory->channel[i].sampleAttenuvert = 0;
-		factory->channel[i].cvOffset = 0;
+		factory->channel[i].cvAttenuvert = 0;
+		factory->channel[i].cvTarget = CVTARGET_SAMPLE;
+		factory->channel[i].cvOffset = 0.0f;
 	}
 }
 
@@ -100,17 +110,22 @@ int getValue(int old, int inc, int min, int max, bool mod) {
 	return ret;
 }
 
+int time_enc_held; // time in ms that encoder is being held down
 int time_held[4]; // time in ms that button is being held down
 bool button_trigger[4];
 
 void GenerateUiEvents()
 {
 	enc.Debounce();
-    if(enc.RisingEdge())
-        eventQueue.AddButtonPressed(bttnEncoder, 1);
+	if (enc.Pressed())
+		time_enc_held = enc.TimeHeldMs();
 
-    if(enc.FallingEdge())
-        eventQueue.AddButtonReleased(bttnEncoder);
+    if(enc.FallingEdge()) {
+		if (time_enc_held > 250)
+        	eventQueue.AddButtonPressed(bttnEncoder, 1);
+		else
+			eventQueue.AddButtonReleased(bttnEncoder);
+	}
 
     const auto increments = enc.Increment();
     if(increments != 0)
@@ -124,20 +139,20 @@ void GenerateUiEvents()
 			time_held[i] = sel_sw[i].TimeHeldMs();
 
 		if(sel_sw[i].FallingEdge()) {
-			if (time_held[i] > 250)
+			if (time_held[i] > 250) {
 				// Call it "Pressed" if held for long enough...
         		eventQueue.AddButtonPressed(bttnSelA + i, 1);
-			else {
+				button_trigger[i] = true; // play sample on long press
+			} else {
 				// ...otherwise call it "Released"
 				eventQueue.AddButtonReleased(bttnSelA + i);
-				button_trigger[i] = true;
+
 			}
 		}
 	}
 }
 
 bool trigger_last[4] = {false, false, false, false};
-int cvVal[4];
 
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
@@ -159,29 +174,34 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 
 	// light buttons when pressed or triggered
 	for (int ch=0; ch<4; ch++) {
-		bool val = sel_sw[ch].Pressed() || trigger[ch];
+		float val = trigger[ch] ? 1.0f : ((editting == EDIT_A + ch) ? 0.5f : 0.0f);
 		if (ch < 2)
-			hw.WriteCvOut(ch+1, val ? 3.3f : 0.f);
+			hw.WriteCvOut(ch+1, val * 5.0f);
 		else {
-			sel_led[ch].Set(val ? 1.0f : 0.f);
+			sel_led[ch].Set(val);
 			sel_led[ch].Update();
 		}
 	}
 
 	// read CVs
-	cvVal[0] = hw.GetAdcValue(CV_1) * 100 + sampleState.channel[0].cvOffset;
-	cvVal[1] = hw.GetAdcValue(CV_2) * 100 + sampleState.channel[1].cvOffset;
-	cvVal[2] = hw.GetAdcValue(CV_3) * 100 + sampleState.channel[2].cvOffset;
-	cvVal[3] = hw.GetAdcValue(CV_4) * 100 + sampleState.channel[3].cvOffset;
+	float cvVal[4];
+	cvVal[0] = hw.GetAdcValue(CV_1) + sampleState.channel[0].cvOffset;
+	cvVal[1] = hw.GetAdcValue(CV_2) + sampleState.channel[1].cvOffset;
+	cvVal[2] = hw.GetAdcValue(CV_3) + sampleState.channel[2].cvOffset;
+	cvVal[3] = hw.GetAdcValue(CV_4) + sampleState.channel[3].cvOffset;
 
 	float cvNum[4];
 	int sNum[4];
 	float level[4];
 	for (int ch=0; ch<4; ch++) {
 		if (!channel_updating[ch]) {
-			cvNum[ch] = (float) (cvVal[ch] * sampleState.channel[ch].sampleAttenuvert) / 100.f;
+			cvVal[ch] *= ((float) sampleState.channel[ch].cvAttenuvert) / 100.0f;
+			cvNum[ch] = sampleState.channel[ch].cvTarget == CVTARGET_SAMPLE ? cvVal[ch] * 60.0f : 0.0f; // convert cv to midi #
 			sNum[ch] = getValue (sampleState.channel[ch].sampleNum + (int) cvNum[ch], 0, 0, channelData[ch].numFiles - 1, false);
-			level[ch] = sampleState.channel[ch].level / 200.f;
+			level[ch] = ((float) sampleState.channel[ch].level) / 100.0f;
+			level[ch] += sampleState.channel[ch].cvTarget == CVTARGET_LEVEL ? cvVal[ch] : 0.0f;
+			if (level[ch] < 0.0f)
+				level[ch] = 0.0f; 
 			sPlayer[ch].SetSample(sampleState.channel[ch].dirNum,
 						  	  	  sNum[ch],
 							  	  channelData[ch].files[sNum[ch]].buffPnt,
@@ -504,12 +524,13 @@ void readQueue(ModuleState &sampleState)
         UiEventQueue::Event e = eventQueue.GetAndRemoveNextEvent();
         switch(e.type)
         {
-            case UiEventQueue::Event::EventType::buttonPressed:
-                // button presses (long presses for selects)
+            case UiEventQueue::Event::EventType::buttonReleased:
+                // short button presses
                 switch(e.asButtonPressed.id)
                 {
                     case bttnEncoder:
-						editting = EDIT_NONE;
+						if (editting != EDIT_NONE)
+							sub_editting = (EditSubField)((sub_editting + 1) % NUM_SUBEDIT);
 						break;
                     case bttnSelA:
                         if(editting != EDIT_A)
@@ -567,12 +588,12 @@ void readQueue(ModuleState &sampleState)
 							sampleState.channel[ch].level = getValue(sampleState.channel[ch].level, inc, 0, 100, false);
                             break;
                         
-						case SUBEDIT_SAMPLE_ATT:
-							sampleState.channel[ch].sampleAttenuvert = getValue(sampleState.channel[ch].sampleAttenuvert, inc, -60, 60, false);
+						case SUBEDIT_CVATT:
+							sampleState.channel[ch].cvAttenuvert = getValue(sampleState.channel[ch].cvAttenuvert, inc, -100, 100, false);
                             break;
                         
-						case SUBEDIT_CVOFFSET:
-							sampleState.channel[ch].cvOffset = getValue(sampleState.channel[ch].cvOffset, inc, -100, 100, false);
+						case SUBEDIT_CVTARGET:
+							sampleState.channel[ch].cvTarget = getValue(sampleState.channel[ch].cvTarget, inc, 0, NUM_CVTARGET-1, true);
                             break;
 
 						default:
@@ -581,8 +602,18 @@ void readQueue(ModuleState &sampleState)
                 }
                 break;
 
-			// Short presses on selects
-			case UiEventQueue::Event::EventType::buttonReleased:
+			// Long presses
+			case UiEventQueue::Event::EventType::buttonPressed:
+			    switch(e.asButtonPressed.id)
+                {
+					// long press on encoder takes us to "home" screen
+                 	case bttnEncoder:
+						editting = EDIT_NONE;
+						break;
+
+					default:
+						break;
+				}
 				break;
 
             default: break;
@@ -639,17 +670,15 @@ void displayState(ModuleState &sampleState) {
 
 		// Attenuvert
 		display.SetCursor(0, 40);
-		display.WriteString("Atten:   ", Font_7x10, true); 
-		sprintf(sbuf, "%c%2.2d", sampleState.channel[ch].sampleAttenuvert >= 0 ? '+' : '-', abs(sampleState.channel[ch].sampleAttenuvert));
-		display.WriteString(sbuf, Font_7x10, sub_editting != SUBEDIT_SAMPLE_ATT);
+		display.WriteString("Atten:   ", Font_7x10, true);
+		int att = abs(sampleState.channel[ch].cvAttenuvert);
+		sprintf(sbuf, "%c%1.1d.%2.2d", sampleState.channel[ch].cvAttenuvert >= 0 ? '+' : '-', att / 100, att % 100);
+		display.WriteString(sbuf, Font_7x10, sub_editting != SUBEDIT_CVATT);
 
 		// Offset
 		display.SetCursor(0, 50);
-		display.WriteString("Offset:  ", Font_7x10, true);
-		sprintf(sbuf, "%c%2.2d", sampleState.channel[ch].cvOffset >= 0 ? '+' : '-', abs(sampleState.channel[ch].cvOffset));
-		display.WriteString(sbuf, Font_7x10, sub_editting != SUBEDIT_CVOFFSET);
-		sprintf(sbuf, " %2.2d", cvVal[ch]);
-		display.WriteString(sbuf, Font_7x10, true);
+		display.WriteString("CVSel:  ", Font_7x10, true);
+		display.WriteString(target_names[sampleState.channel[ch].cvTarget], Font_7x10, sub_editting != SUBEDIT_CVTARGET);
 	}
 
 	display.Update();
@@ -659,6 +688,31 @@ void processUI() {
 	ModuleState &sampleState = SavedState.GetSettings();
 	readQueue(sampleState);
 	displayState(sampleState);
+}
+
+#define CALIBRATE_USECS 10000
+#define CALIBRATE_FILTER_CONST 0.001f
+// filter CV inputs and then update offsets
+//
+void calibrateCV (ModuleState &currentState) {
+	Smoother cv_filter[4];
+
+	// init smoothers
+	for (int i = 0; i < 4; i++)
+		cv_filter[i].Init(CALIBRATE_FILTER_CONST);
+
+	// load 'em up
+	for (int t = 0; t < CALIBRATE_USECS; t++) {
+		cv_filter[0].Process(hw.GetAdcValue(CV_1));
+		cv_filter[1].Process(hw.GetAdcValue(CV_2));
+		cv_filter[2].Process(hw.GetAdcValue(CV_3));
+		cv_filter[3].Process(hw.GetAdcValue(CV_4));
+		System::DelayUs(1);
+	}
+
+	// Save 'em
+	for (int i = 0; i < 6; i++)
+		currentState.channel[i].cvOffset = cv_filter[i].GetVal();
 }
 
 int main(void)
@@ -677,8 +731,6 @@ int main(void)
 	sel_sw[3].Init(DaisyPatchSM::A2);
 
 	// LEDs
-	//sel_led[0].Init(DaisyPatchSM::C10, false); // CV_OUT_1
-	//sel_led[1].Init(DaisyPatchSM::C1, false);  // CV_OUT_2
 	sel_led[2].Init(DaisyPatchSM::B5, false);
 	sel_led[3].Init(DaisyPatchSM::B6, false);
 
@@ -688,15 +740,7 @@ int main(void)
 	display.Fill(false);
 	display.WriteString("Hello", Font_7x10, true);
 	display.Update();
-
-	// Load up sdcard
-	SdmmcHandler::Config sd_cfg;
-    sd_cfg.Defaults();
-	sd_cfg.speed = SdmmcHandler::Speed::STANDARD;
-    sdcard.Init(sd_cfg);
-    fsi.Init(FatFSInterface::Config::MEDIA_SD);
-    f_mount(&fsi.GetSDFileSystem(), "/", 1);
-	readRoot(fsi.GetSDPath());
+	System::Delay(250);
 
 	// factory initialize module state if needed
     ModuleState defState;
@@ -708,6 +752,24 @@ int main(void)
     if (writtenState.version != defState.version) {
         SavedState.RestoreDefaults();
     }
+
+	// Calibrate CV inputs if SELA is pressed at power-up
+	if (sel_sw[0].RawState()) {
+		calibrateCV(writtenState);
+		display.Fill(false);
+		display.WriteString("Calibrated", Font_7x10, true);
+		display.Update();
+		System::Delay(500);
+	}
+
+	// Load up sdcard
+	SdmmcHandler::Config sd_cfg;
+    sd_cfg.Defaults();
+	sd_cfg.speed = SdmmcHandler::Speed::STANDARD;
+    sdcard.Init(sd_cfg);
+    fsi.Init(FatFSInterface::Config::MEDIA_SD);
+    f_mount(&fsi.GetSDFileSystem(), "/", 1);
+	readRoot(fsi.GetSDPath());
 
 	//char sbuf[80];
 	// update channels with initial state

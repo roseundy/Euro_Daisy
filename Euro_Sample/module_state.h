@@ -9,14 +9,16 @@ struct SampleChannel
     int dirNum;
     int sampleNum;
     int level;
-    int sampleAttenuvert;
-    int cvOffset;
+    int cvAttenuvert;
+    int cvTarget;
+    float cvOffset;
 
     bool operator== (const SampleChannel &rhs) const {
     return ((this->dirNum == rhs.dirNum) &&
             (this->sampleNum == rhs.sampleNum) &&
             (this->level == rhs.level) &&
-            (this->sampleAttenuvert == rhs.sampleAttenuvert) &&
+            (this->cvAttenuvert == rhs.cvAttenuvert) &&
+            (this->cvTarget == rhs.cvTarget) &&
             (this->cvOffset == rhs.cvOffset));
     };
 };
