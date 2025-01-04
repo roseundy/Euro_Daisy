@@ -6,6 +6,7 @@
 #include "smoother.h"
 #include "my_delayline.h"
 #include "module_state.h"
+#include "MyPersistantStorage.h"
 
 using namespace daisy;
 using namespace patch_sm;
@@ -48,7 +49,7 @@ MyDelayLine<float, FIVE_SEC_DELAY> DSY_SDRAM_BSS audio_delay;	// 10 seconds of d
 MyDelayLine<uint8_t, FIVE_SEC_DELAY> DSY_SDRAM_BSS tg_delay; 	// 10 seconds of delay on Trigger/Gte
 Slew slew;				// slew generator
 SlewSM state_machine;	// slew state machine
-PersistentStorage<ModuleState>  SavedState(hw.qspi);
+MyPersistentStorage<ModuleState>  SavedState(hw.qspi);
 
 #define SAVE_VERSION 0
 void initFactoryState(ModuleState *factory) {
