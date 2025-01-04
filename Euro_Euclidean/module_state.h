@@ -10,13 +10,19 @@ struct EuclidChannel {
     int                 pulsesAttenuvert;
     int                 offsetSetting;
     int                 offsetAttenuvert;
+    float               pulsesCVOffset;
+    float               offsetCVOffset;
+    bool                muted;
 
     bool operator== (const EuclidChannel &rhs) const {
     return ((this->length == rhs.length) &&
             (this->pulsesSetting == rhs.pulsesSetting) &&
             (this->pulsesAttenuvert == rhs.pulsesAttenuvert) &&
             (this->offsetSetting == rhs.offsetSetting) &&
-            (this->offsetAttenuvert == rhs.offsetAttenuvert));
+            (this->offsetAttenuvert == rhs.offsetAttenuvert) &&
+            (this->pulsesCVOffset == rhs.pulsesCVOffset) &&
+            (this->offsetCVOffset == rhs.offsetCVOffset) &&
+            (this->muted == rhs.muted));
     };
 
 };
