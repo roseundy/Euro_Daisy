@@ -6,6 +6,7 @@
 #include "sample_player.h"
 #include "string_sort.h"
 #include "smoother.h"
+#include "MyPersistantStorage.h"
 //#include <vector>
 //#include <string>
 //#include <algorithm>
@@ -23,7 +24,7 @@ MyOledDisplay   		display;
 SdmmcHandler   			sdcard;
 FatFSInterface 			fsi;
 UiEventQueue       		eventQueue;
-PersistentStorage<ModuleState>  SavedState(hw.qspi);
+MyPersistentStorage<ModuleState>  SavedState(hw.qspi);
 SamplePlayer            sPlayer[4];
 
 enum EditField {
@@ -153,6 +154,7 @@ void GenerateUiEvents()
 }
 
 bool trigger_last[4] = {false, false, false, false};
+int sampleNum[4] = {0, 0, 0, 0};
 
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
@@ -185,27 +187,26 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 
 	// read CVs
 	float cvVal[4];
-	cvVal[0] = hw.GetAdcValue(CV_1) + sampleState.channel[0].cvOffset;
-	cvVal[1] = hw.GetAdcValue(CV_2) + sampleState.channel[1].cvOffset;
-	cvVal[2] = hw.GetAdcValue(CV_3) + sampleState.channel[2].cvOffset;
-	cvVal[3] = hw.GetAdcValue(CV_4) + sampleState.channel[3].cvOffset;
+	cvVal[0] = hw.GetAdcValue(CV_1) - sampleState.channel[0].cvOffset;
+	cvVal[1] = hw.GetAdcValue(CV_2) - sampleState.channel[1].cvOffset;
+	cvVal[2] = hw.GetAdcValue(CV_3) - sampleState.channel[2].cvOffset;
+	cvVal[3] = hw.GetAdcValue(CV_4) - sampleState.channel[3].cvOffset;
 
 	float cvNum[4];
-	int sNum[4];
 	float level[4];
 	for (int ch=0; ch<4; ch++) {
 		if (!channel_updating[ch]) {
 			cvVal[ch] *= ((float) sampleState.channel[ch].cvAttenuvert) / 100.0f;
 			cvNum[ch] = sampleState.channel[ch].cvTarget == CVTARGET_SAMPLE ? cvVal[ch] * 60.0f : 0.0f; // convert cv to midi #
-			sNum[ch] = getValue (sampleState.channel[ch].sampleNum + (int) cvNum[ch], 0, 0, channelData[ch].numFiles - 1, false);
+			sampleNum[ch] = getValue (sampleState.channel[ch].sampleNum + (int) cvNum[ch], 0, 0, channelData[ch].numFiles - 1, false);
 			level[ch] = ((float) sampleState.channel[ch].level) / 100.0f;
 			level[ch] += sampleState.channel[ch].cvTarget == CVTARGET_LEVEL ? cvVal[ch] : 0.0f;
 			if (level[ch] < 0.0f)
 				level[ch] = 0.0f; 
 			sPlayer[ch].SetSample(sampleState.channel[ch].dirNum,
-						  	  	  sNum[ch],
-							  	  channelData[ch].files[sNum[ch]].buffPnt,
-							      channelData[ch].files[sNum[ch]].size);
+						  	  	  sampleNum[ch],
+							  	  channelData[ch].files[sampleNum[ch]].buffPnt,
+							      channelData[ch].files[sampleNum[ch]].size);
 		}
 	}
 	
@@ -640,7 +641,7 @@ void displayState(ModuleState &sampleState) {
 	if (editting == EDIT_NONE) {
 		for (int ch=0; ch<4; ch++) {
 			display.SetCursor(0, ch * 16);
-			stripName(fname, channelData[ch].files[sampleState.channel[ch].sampleNum].fileName);
+			stripName(fname, channelData[ch].files[sampleNum[ch]].fileName);
 			sprintf(sbuf, "%c: ", 'A' + ch);
 			display.WriteString(sbuf, Font_7x10, true);
 			display.WriteString(fname, Font_7x10, !sPlayer[ch].Playing());
@@ -711,7 +712,7 @@ void calibrateCV (ModuleState &currentState) {
 	}
 
 	// Save 'em
-	for (int i = 0; i < 6; i++)
+	for (int i = 0; i < 4; i++)
 		currentState.channel[i].cvOffset = cv_filter[i].GetVal();
 }
 
