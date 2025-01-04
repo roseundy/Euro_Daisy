@@ -6,6 +6,7 @@
 #include "OffsetCustomItem.h"
 #include "fm3.h"
 #include "fm4op.h"
+#include "MyPersistantStorage.h"
 #include "dev/oled_ssd130x.h"
 #include "dsp/dsp.h"
 #include "dsp/performance_state.h"
@@ -185,7 +186,7 @@ float p2Offset;
 float p3Offset;
 float p4Offset;
 
-PersistentStorage<moduleState>  SavedState(hw.qspi);
+MyPersistentStorage<moduleState>  SavedState(hw.qspi);
 bool                            gate_last;
 bool                            useOutputEnvelope;
 bool                            pairSync;
