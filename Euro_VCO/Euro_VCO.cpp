@@ -200,7 +200,7 @@ void initFmOp(fmOpState *opState) {
     opState->useOpEnvelope = false;
     opState->opEnvValues.attack = 0.1f;
     opState->opEnvValues.decay = 0.1f;
-    opState->opEnvValues.sustain = 0.5f;
+    opState->opEnvValues.sustain = 50;
     opState->opEnvValues.release = 0.1f;
 }
 
@@ -238,7 +238,7 @@ void initFactoryState(moduleState *state) {
     state->outputEnvValues.attack = 0.1f;
     state->outputEnvValues.decay = 0.1f;
     state->outputEnvValues.release = 0.1f;
-    state->outputEnvValues.sustain = 0.5f;
+    state->outputEnvValues.sustain = 50;
 
     state->octave = 0.25f;
     state->octInt = 2;
@@ -690,7 +690,7 @@ void State2Ui(moduleState &VCOState) {
     envelopeValueA.Set(VCOState.outputEnvValues.attack);
     envelopeValueD.Set(VCOState.outputEnvValues.decay);
     envelopeValueR.Set(VCOState.outputEnvValues.release);
-    envelopeValueS.Set(VCOState.outputEnvValues.sustain * 100.f);
+    envelopeValueS.Set(VCOState.outputEnvValues.sustain);
 
     // octave -> VCOState.octave = ???
     // 1      -> 0 Volts = 440Hz / 8
@@ -786,7 +786,7 @@ moduleState &ProcessState() {
     VCOState.outputEnvValues.attack = envelopeValueA.Get();
     VCOState.outputEnvValues.decay = envelopeValueD.Get();
     VCOState.outputEnvValues.release = envelopeValueR.Get();
-    VCOState.outputEnvValues.sustain = envelopeValueS.Get() / 100.f;
+    VCOState.outputEnvValues.sustain = envelopeValueS.Get();
 
     // octave -> VCOState.octave = ???
     // 1      -> 0 Volts = 440Hz / 8
@@ -1087,7 +1087,7 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 	env.SetTime(ADSR_SEG_ATTACK, VCOState.outputEnvValues.attack);
     env.SetTime(ADSR_SEG_DECAY, VCOState.outputEnvValues.decay);
 	env.SetTime(ADSR_SEG_RELEASE, VCOState.outputEnvValues.release);
-    env.SetSustainLevel(VCOState.outputEnvValues.sustain);
+    env.SetSustainLevel(VCOState.outputEnvValues.sustain / 100.0f);
     float env_level = env.Process(gate);
 
     float mix1 = 0.0, mix2 = 1.0;
@@ -1190,7 +1190,7 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             fm_env[op].SetTime(ADSR_SEG_ATTACK, VCOState.fmOpSettings[op].opEnvValues.attack);
             fm_env[op].SetTime(ADSR_SEG_DECAY, VCOState.fmOpSettings[op].opEnvValues.decay);
 	        fm_env[op].SetTime(ADSR_SEG_RELEASE, VCOState.fmOpSettings[op].opEnvValues.release);
-            fm_env[op].SetSustainLevel(VCOState.fmOpSettings[op].opEnvValues.sustain);
+            fm_env[op].SetSustainLevel(VCOState.fmOpSettings[op].opEnvValues.sustain / 100.0f);
             float elevel = fm_env[op].Process(gate);
             float level = VCOState.fmOpSettings[op].useOpEnvelope ? elevel : p[op];
             float index = level * VCOState.fmOpSettings[op].maxIndex / 100.f;
